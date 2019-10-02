@@ -1,0 +1,165 @@
+version: '3.7'
+
+# consul:
+#   client_addr is set to 0.0.0.0 to make control from the host easier
+#   it should be disabled for real topologies
+
+# envoy:
+#   admin-bind is set to 0.0.0.0 to make control from the host easier
+#   it should be disabled for real topologies
+
+networks:
+  consul-wan:
+    ipam:
+      driver: default
+      config:
+        - subnet: '10.41.0.0/16'
+  consul-dc1:
+    ipam:
+      driver: default
+      config:
+        - subnet: '10.40.1.0/24'
+  consul-dc2:
+    ipam:
+      driver: default
+      config:
+        - subnet: '10.40.2.0/24'
+
+volumes:
+  dc1-server1:
+  dc2-server1:
+
+services:
+  dc1-server1-node:
+    container_name: 'dc1-server1-node'
+    hostname: 'dc1-server1-node'
+    image: gcr.io/google_containers/pause:1.0
+    restart: always
+    dns: 8.8.8.8
+    networks:
+      consul-dc1:
+        ipv4_address: '10.40.1.11'
+      consul-wan:
+        ipv4_address: '10.41.1.11'
+
+  dc1-server1:
+    network_mode: 'service:dc1-server1-node'
+    depends_on:
+      - 'dc1-server1-node'
+    volumes:
+      - 'dc1-server1:/consul/data'
+    image: 'consul-dev:latest'
+    command:
+      - 'agent'
+      - '-hcl'
+      - |
+        bootstrap_expect              = 1
+        client_addr                   = "0.0.0.0"
+        advertise_addr                = "10.40.1.11"
+        advertise_addr_wan            = "10.41.1.11"
+        translate_wan_addrs           = true
+        client_addr                   = "0.0.0.0"
+        datacenter                    = "dc1"
+        disable_update_check          = true
+        log_level                     = "debug"
+        enable_debug                  = true
+        enable_central_service_config = true
+        use_mesh_gateway_over_wan     = true
+        primary_datacenter            = "dc1"
+        server                        = true
+        ui                            = true
+        ports {
+          grpc = 8502
+        }
+        connect {
+          enabled = true
+        }
+
+  dc1-mesh-gateway:
+    network_mode: 'service:dc1-server1-node'
+    depends_on:
+      - dc1-server1
+    image: 'consulenvoy:latest'
+    init: true
+    restart: on-failure
+    command:
+      - 'consul'
+      - 'connect'
+      - 'envoy'
+      - '-register'
+      - '-mesh-gateway'
+      - '-expose-servers'
+      - '-wan-address'
+      - '{{ GetInterfaceIP "eth1" }}:443'
+      - '-admin-bind'
+      - '0.0.0.0:19000'
+      - '--'
+      - '-l'
+      - 'info'
+
+  dc2-server1-node:
+    container_name: 'dc2-server1-node'
+    hostname: 'dc2-server1-node'
+    image: gcr.io/google_containers/pause:1.0
+    restart: always
+    dns: 8.8.8.8
+    networks:
+      consul-dc2:
+        ipv4_address: '10.40.2.11'
+      consul-wan:
+        ipv4_address: '10.41.2.11'
+
+  dc2-server1:
+    network_mode: 'service:dc2-server1-node'
+    depends_on:
+      - 'dc2-server1-node'
+    volumes:
+      - 'dc2-server1:/consul/data'
+    image: 'consul-dev:latest'
+    command:
+      - 'agent'
+      - '-hcl'
+      - |
+        bootstrap_expect              = 1
+        client_addr                   = "0.0.0.0"
+        advertise_addr                = "10.40.2.11"
+        advertise_addr_wan            = "10.41.2.11"
+        translate_wan_addrs           = true
+        client_addr                   = "0.0.0.0"
+        datacenter                    = "dc2"
+        disable_update_check          = true
+        log_level                     = "debug"
+        enable_debug                  = true
+        enable_central_service_config = true
+        use_mesh_gateway_over_wan     = true
+        primary_datacenter            = "dc1"
+        server                        = true
+        ui                            = true
+        ports {
+          grpc = 8502
+        }
+        connect {
+          enabled = true
+        }
+
+  dc2-mesh-gateway:
+    network_mode: 'service:dc2-server1-node'
+    depends_on:
+      - dc2-server1
+    image: 'consulenvoy:latest'
+    init: true
+    restart: on-failure
+    command:
+      - 'consul'
+      - 'connect'
+      - 'envoy'
+      - '-register'
+      - '-mesh-gateway'
+      - '-expose-servers'
+      - '-wan-address'
+      - '{{ GetInterfaceIP "eth1" }}:443'
+      - '-admin-bind'
+      - '0.0.0.0:19000'
+      - '--'
+      - '-l'
+      - 'info'

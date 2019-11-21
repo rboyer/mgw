@@ -28,6 +28,8 @@ networks:
 volumes:
   dc1-server1:
   dc2-server1:
+  dc1-client1:
+  dc2-client1:
 
 services:
   dc1-server1-node:
@@ -39,8 +41,6 @@ services:
     networks:
       consul-dc1:
         ipv4_address: '10.40.1.11'
-      consul-wan:
-        ipv4_address: '10.41.1.11'
 
   dc1-server1:
     network_mode: 'service:dc1-server1-node'
@@ -48,6 +48,7 @@ services:
       - 'dc1-server1-node'
     volumes:
       - 'dc1-server1:/consul/data'
+      - './cache:/conf:ro'
     image: 'consul-dev:latest'
     command:
       - 'agent'
@@ -56,29 +57,85 @@ services:
         bootstrap_expect              = 1
         client_addr                   = "0.0.0.0"
         advertise_addr                = "10.40.1.11"
-        advertise_addr_wan            = "10.41.1.11"
-        translate_wan_addrs           = true
-        client_addr                   = "0.0.0.0"
         datacenter                    = "dc1"
         disable_update_check          = true
         log_level                     = "debug"
         enable_debug                  = true
         enable_central_service_config = true
-        use_mesh_gateway_over_wan     = true
         primary_datacenter            = "dc1"
         server                        = true
         ui                            = true
+        encrypt                       = "BDUZhHuZt54HeVVI9/xekZV6CtWtJme7zsI4gbS42zg="
+        ca_file                       = "/conf/consul-agent-ca.pem"
+        cert_file                     = "/conf/dc1-server-consul-0.pem"
+        key_file                      = "/conf/dc1-server-consul-0-key.pem"
+        verify_incoming               = true
+        verify_outgoing               = true
+        verify_server_hostname        = true
         ports {
           grpc = 8502
         }
         connect {
           enabled = true
+          enable_mesh_gateway_wan_federation = true
         }
 
-  dc1-mesh-gateway:
-    network_mode: 'service:dc1-server1-node'
+  dc1-client1-node:
+    container_name: 'dc1-client1-node'
+    hostname: 'dc1-client1-node'
+    image: gcr.io/google_containers/pause:1.0
+    restart: always
+    dns: 8.8.8.8
+    networks:
+      consul-dc1:
+        ipv4_address: '10.40.1.12'
+      consul-wan:
+        ipv4_address: '10.41.1.12'
+
+  dc1-client1:
+    network_mode: 'service:dc1-client1-node'
     depends_on:
-      - dc1-server1
+      - 'dc1-client1-node'
+      - 'dc1-server1'
+    volumes:
+      - 'dc1-client1:/consul/data'
+      - './cache:/conf:ro'
+    image: 'consul-dev:latest'
+    command:
+      - 'agent'
+      - '-hcl'
+      - |
+        client_addr                   = "0.0.0.0"
+        advertise_addr                = "10.40.1.12"
+        advertise_addr_wan            = "10.41.1.12"
+        translate_wan_addrs           = true
+        datacenter                    = "dc1"
+        disable_update_check          = true
+        log_level                     = "debug"
+        enable_debug                  = true
+        enable_central_service_config = true
+        primary_datacenter            = "dc1"
+        retry_join                    = [ "10.40.1.11" ]
+        server                        = false
+        ui                            = true
+        encrypt                       = "BDUZhHuZt54HeVVI9/xekZV6CtWtJme7zsI4gbS42zg="
+        ca_file                       = "/conf/consul-agent-ca.pem"
+        cert_file                     = "/conf/dc1-client-consul-0.pem"
+        key_file                      = "/conf/dc1-client-consul-0-key.pem"
+        verify_incoming               = true
+        verify_outgoing               = true
+        verify_server_hostname        = true
+        connect {
+          enabled = true
+        }
+        ports {
+          grpc = 8502
+        }
+
+  dc1-mesh-gateway1:
+    network_mode: 'service:dc1-client1-node'
+    depends_on:
+      - dc1-client1
     image: 'consulenvoy:latest'
     init: true
     restart: on-failure
@@ -90,12 +147,14 @@ services:
       - '-mesh-gateway'
       - '-expose-servers'
       - '-wan-address'
-      - '{{ GetInterfaceIP "eth1" }}:443'
+      - '10.41.1.12:443'
       - '-admin-bind'
       - '0.0.0.0:19000'
       - '--'
       - '-l'
       - 'info'
+
+  ######################################################
 
   dc2-server1-node:
     container_name: 'dc2-server1-node'
@@ -115,6 +174,7 @@ services:
       - 'dc2-server1-node'
     volumes:
       - 'dc2-server1:/consul/data'
+      - './cache:/conf:ro'
     image: 'consul-dev:latest'
     command:
       - 'agent'
@@ -123,29 +183,88 @@ services:
         bootstrap_expect              = 1
         client_addr                   = "0.0.0.0"
         advertise_addr                = "10.40.2.11"
-        advertise_addr_wan            = "10.41.2.11"
-        translate_wan_addrs           = true
-        client_addr                   = "0.0.0.0"
         datacenter                    = "dc2"
         disable_update_check          = true
         log_level                     = "debug"
         enable_debug                  = true
         enable_central_service_config = true
-        use_mesh_gateway_over_wan     = true
         primary_datacenter            = "dc1"
+        primary_gateways              = [ "10.41.1.12:443" ]
+        #retry_join_wan                = [ "dc1-server1-node.dc1/10.40.1.11", "dc2-server1-node.dc2/10.40.2.11" ]
+        retry_join_wan                = [ "dc1-server1-node.dc1/10.40.1.11" ]
         server                        = true
         ui                            = true
+        encrypt                       = "BDUZhHuZt54HeVVI9/xekZV6CtWtJme7zsI4gbS42zg="
+        ca_file                       = "/conf/consul-agent-ca.pem"
+        cert_file                     = "/conf/dc2-server-consul-0.pem"
+        key_file                      = "/conf/dc2-server-consul-0-key.pem"
+        verify_incoming               = true
+        verify_outgoing               = true
+        verify_server_hostname        = true
         ports {
           grpc = 8502
         }
         connect {
           enabled = true
+          enable_mesh_gateway_wan_federation = true
+        }
+
+  dc2-client1-node:
+    container_name: 'dc2-client1-node'
+    hostname: 'dc2-client1-node'
+    image: gcr.io/google_containers/pause:1.0
+    restart: always
+    dns: 8.8.8.8
+    networks:
+      consul-dc2:
+        ipv4_address: '10.40.2.12'
+      consul-wan:
+        ipv4_address: '10.41.2.12'
+
+  dc2-client1:
+    network_mode: 'service:dc2-client1-node'
+    depends_on:
+      - 'dc2-client1-node'
+      - 'dc2-server1'
+    volumes:
+      - 'dc2-client1:/consul/data'
+      - './cache:/conf:ro'
+    image: 'consul-dev:latest'
+    command:
+      - 'agent'
+      - '-hcl'
+      - |
+        client_addr                   = "0.0.0.0"
+        advertise_addr                = "10.40.2.12"
+        advertise_addr_wan            = "10.41.2.12"
+        translate_wan_addrs           = true
+        datacenter                    = "dc2"
+        disable_update_check          = true
+        log_level                     = "debug"
+        enable_debug                  = true
+        enable_central_service_config = true
+        primary_datacenter            = "dc1"
+        retry_join                    = [ "10.40.2.11" ]
+        server                        = false
+        ui                            = true
+        encrypt                       = "BDUZhHuZt54HeVVI9/xekZV6CtWtJme7zsI4gbS42zg="
+        ca_file                       = "/conf/consul-agent-ca.pem"
+        cert_file                     = "/conf/dc2-client-consul-0.pem"
+        key_file                      = "/conf/dc2-client-consul-0-key.pem"
+        verify_incoming               = true
+        verify_outgoing               = true
+        verify_server_hostname        = true
+        connect {
+          enabled = true
+        }
+        ports {
+          grpc = 8502
         }
 
   dc2-mesh-gateway:
-    network_mode: 'service:dc2-server1-node'
+    network_mode: 'service:dc2-client1-node'
     depends_on:
-      - dc2-server1
+      - dc2-client1
     image: 'consulenvoy:latest'
     init: true
     restart: on-failure
@@ -157,7 +276,7 @@ services:
       - '-mesh-gateway'
       - '-expose-servers'
       - '-wan-address'
-      - '{{ GetInterfaceIP "eth1" }}:443'
+      - '10.41.2.12:443'
       - '-admin-bind'
       - '0.0.0.0:19000'
       - '--'

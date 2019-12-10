@@ -192,6 +192,8 @@ services:
         primary_gateways              = [ "10.41.1.12:443" ]
         #retry_join_wan                = [ "dc1-server1-node.dc1/10.40.1.11", "dc2-server1-node.dc2/10.40.2.11" ]
         retry_join_wan                = [ "dc1-server1-node.dc1/10.40.1.11" ]
+        retry_interval_wan            = "5s"
+        primary_gateways_interval     = "5s"
         server                        = true
         ui                            = true
         encrypt                       = "BDUZhHuZt54HeVVI9/xekZV6CtWtJme7zsI4gbS42zg="
